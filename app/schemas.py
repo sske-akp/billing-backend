@@ -61,7 +61,7 @@ class InvoiceItem(InvoiceItemBase):
 class InvoiceBase(BaseModel):
     invoice_number: str
     customer_id: Optional[uuid.UUID] = None
-    date: Optional[date] = None
+    invoice_date: Optional[date] = None
     invoice_type: Optional[str] = None
     total_amount: Optional[float] = None
 
