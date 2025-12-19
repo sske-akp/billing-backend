@@ -1,2 +1,5 @@
+[project]
+name = "sske-backend"
+
 [project.scripts]
 app = "app.main:app"
