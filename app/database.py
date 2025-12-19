@@ -1,10 +1,11 @@
 from sqlalchemy import create_engine, MetaData
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
+import os
 
 # Database connection URL
 # Using the URI from the connected MCP server: postgresql://admin:348150@localhost:5435/sskedata
-DATABASE_URL = "postgresql://admin:348150@localhost:5435/sskedata"
+DATABASE_URL = os.environ.get('DATABASE_URL')
 
 # Create a SQLAlchemy engine
 engine = create_engine(DATABASE_URL)
