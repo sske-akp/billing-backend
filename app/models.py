@@ -55,7 +55,7 @@ class Invoice(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     invoice_number = Column(String, nullable=False)
     customer_id = Column(UUID(as_uuid=True), ForeignKey("customers.id"))
-    date = Column(Date)
+    invoice_date = Column(Date)
     invoice_type = Column(String)
     total_amount = Column(Numeric)
     created_at = Column(DateTime, default=datetime.utcnow)
