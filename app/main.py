@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .routers import customers, product_categories, products, invoice_items, invoices, product_batches, product_brands, discounts, invoice_reports
 from .database import engine, Base
+from .db.migrations import run_migrations
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
