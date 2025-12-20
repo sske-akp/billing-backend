@@ -30,6 +30,11 @@ app.add_middleware(
 def read_root():
     return {"Hello": "World"}
 
+
+@app.on_event("startup")
+def startup():
+    run_migrations()
+
 app.include_router(customers.router)
 app.include_router(product_categories.router)
 app.include_router(products.router)
