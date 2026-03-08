@@ -50,10 +50,14 @@ def read_root():
     return {"Hello": "World"}
 
 
+@app.get("/run-migrations")
+def run_db_migrations():
+    run_migrations()
+    return {"status": "migrations complete"}
+
+
 @app.on_event("startup")
 def startup():
-    run_migrations()
-    # Seed chart of accounts after migrations
     db = SessionLocal()
     try:
         seed_chart_of_accounts(db)
