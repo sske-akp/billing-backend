@@ -13,6 +13,14 @@ router = APIRouter(
 
 @router.post("/", response_model=schemas.InvoiceItem)
 def create_invoice_item(item: schemas.InvoiceItemCreate, db: Session = Depends(get_db)):
+    # Decrement batch remaining_qty if batch_id and quantity are provided
+    if item.batch_id and item.quantity:
+        db_batch = db.query(models.ProductBatch).filter(
+            models.ProductBatch.id == item.batch_id
+        ).first()
+        if db_batch and db_batch.remaining_qty is not None:
+            db_batch.remaining_qty -= item.quantity
+
     db_item = models.InvoiceItem(**item.model_dump())
     db.add(db_item)
     db.commit()
@@ -49,6 +57,14 @@ def delete_invoice_item(item_id: uuid.UUID, db: Session = Depends(get_db)):
     db_item = db.query(models.InvoiceItem).filter(models.InvoiceItem.id == item_id).first()
     if db_item is None:
         raise HTTPException(status_code=404, detail="Invoice Item not found")
+
+    # Restore batch remaining_qty when deleting an invoice item
+    if db_item.batch_id and db_item.quantity:
+        db_batch = db.query(models.ProductBatch).filter(
+            models.ProductBatch.id == db_item.batch_id
+        ).first()
+        if db_batch and db_batch.remaining_qty is not None:
+            db_batch.remaining_qty += db_item.quantity
 
     db.delete(db_item)
     db.commit()

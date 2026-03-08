@@ -1,12 +1,13 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routers import customers, product_categories, products, invoice_items, invoices, product_batches, product_brands, discounts, invoice_reports
-from .database import engine, Base
+from .routers import customers, product_categories, products, invoice_items, invoices, product_batches, product_brands, discounts, invoice_reports, suppliers, reports, accounts, journal_entries, payments, accounting_reports
+from .database import engine, Base, SessionLocal
 from .db.migrations import run_migrations
+from .accounting import seed_chart_of_accounts
 
-# Create database tables
-Base.metadata.create_all(bind=engine)
+# Tables are managed by Alembic migrations (run on startup)
+# Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
@@ -35,6 +36,12 @@ def read_root():
 @app.on_event("startup")
 def startup():
     run_migrations()
+    # Seed chart of accounts after migrations
+    db = SessionLocal()
+    try:
+        seed_chart_of_accounts(db)
+    finally:
+        db.close()
 
 app.include_router(customers.router)
 app.include_router(product_categories.router)
@@ -45,3 +52,9 @@ app.include_router(product_batches.router)
 app.include_router(product_brands.router)
 app.include_router(discounts.router)
 app.include_router(invoice_reports.router)
+app.include_router(suppliers.router)
+app.include_router(reports.router)
+app.include_router(accounts.router)
+app.include_router(journal_entries.router)
+app.include_router(payments.router)
+app.include_router(accounting_reports.router)

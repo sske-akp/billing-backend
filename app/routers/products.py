@@ -21,13 +21,13 @@ def create_product(product: schemas.ProductCreate, db: Session = Depends(get_db)
     return db_product
 
 @router.get("/", response_model=List[schemas.Product])
-def read_products(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    products = db.query(models.Product).offset(skip).limit(limit).all()
+def read_products(skip: int = 0, limit: int = 10000, db: Session = Depends(get_db)):
+    products = db.query(models.Product).filter(models.Product.disabled == False).offset(skip).limit(limit).all()
     return products
 
 @router.get("/with_batches/", response_model=List[schemas.ProductWithBatches])
-def read_products_with_batches(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    products = db.query(models.Product).options(joinedload(models.Product.batches)).offset(skip).limit(limit).all()
+def read_products_with_batches(skip: int = 0, limit: int = 10000, db: Session = Depends(get_db)):
+    products = db.query(models.Product).filter(models.Product.disabled == False).options(joinedload(models.Product.batches)).offset(skip).limit(limit).all()
     return products
 
 @router.get("/{product_id}", response_model=schemas.Product)
@@ -56,6 +56,6 @@ def delete_product(product_id: uuid.UUID, db: Session = Depends(get_db)):
     if db_product is None:
         raise HTTPException(status_code=404, detail="Product not found")
 
-    db.delete(db_product)
+    db_product.disabled = True
     db.commit()
-    return {"detail": "Product deleted successfully"}
+    return {"detail": "Product disabled successfully"}
