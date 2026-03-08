@@ -13,4 +13,4 @@ dependencies = [
 ]
 
 [project.scripts]
-app = "app.main:app"
+app = "main:app"
