@@ -1,5 +1,4 @@
 {
-  "deploymentEnabled": false,
   "builds": [
     {
       "src": "app/main.py",
