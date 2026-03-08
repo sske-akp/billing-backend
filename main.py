@@ -6,6 +6,7 @@ from pydantic import BaseModel
 app = FastAPI()
 
 
+# test
 class Item(BaseModel):
     name: str
     price: float
