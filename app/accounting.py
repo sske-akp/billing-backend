@@ -90,11 +90,31 @@ def _create_journal_entry(
     return journal_entry
 
 
+def _compute_cogs(db: Session, items) -> Decimal:
+    """Compute cost of goods sold for a set of invoice items using batch-level
+    (specific-identification) costing. Each item pins a batch_id, so the cost is
+    the batch purchase_price * quantity. Items without a batch contribute 0."""
+    cogs = Decimal("0")
+    for item in items:
+        if not item.batch_id:
+            continue
+        batch = (
+            db.query(models.ProductBatch)
+            .filter(models.ProductBatch.id == item.batch_id)
+            .first()
+        )
+        if batch and batch.purchase_price is not None:
+            cogs += Decimal(str(batch.purchase_price)) * Decimal(str(item.quantity or 0))
+    return cogs
+
+
 def create_sale_journal_entry(db: Session, invoice: models.Invoice) -> models.JournalEntry:
     """Create journal entry for a sale invoice.
     DR Accounts Receivable (total_amount)
-    CR Sales Revenue (total_amount / 1.18 * 1.0 = base amount)
-    CR GST Output Tax (total_amount - base amount)
+    CR Sales Revenue (base amount, pre-GST)
+    CR GST Output Tax (gst amount)
+    DR Cost of Goods Sold (batch cost)
+    CR Inventory (batch cost)
     """
     accounts_receivable = _get_account_by_code(db, "1100")
     sales_revenue = _get_account_by_code(db, "4000")
@@ -118,6 +138,15 @@ def create_sale_journal_entry(db: Session, invoice: models.Invoice) -> models.Jo
         {"account_id": sales_revenue.id, "debit": Decimal("0"), "credit": base_amount, "description": "Sales Revenue"},
         {"account_id": gst_output.id, "debit": Decimal("0"), "credit": gst_amount, "description": "GST Output Tax"},
     ]
+
+    # Post cost of goods sold against inventory so gross profit and the
+    # inventory asset are both correct.
+    cogs = _compute_cogs(db, invoice.items)
+    if cogs > 0:
+        cogs_account = _get_account_by_code(db, "5000")
+        inventory = _get_account_by_code(db, "1200")
+        lines.append({"account_id": cogs_account.id, "debit": cogs, "credit": Decimal("0"), "description": "Cost of Goods Sold"})
+        lines.append({"account_id": inventory.id, "debit": Decimal("0"), "credit": cogs, "description": "Inventory"})
 
     return _create_journal_entry(
         db,
@@ -155,6 +184,32 @@ def create_payment_journal_entry(db: Session, payment: models.Payment) -> models
     )
 
 
+def create_supplier_payment_journal_entry(db: Session, payment: models.Payment) -> models.JournalEntry:
+    """Create journal entry for a payment made to a supplier.
+    DR Accounts Payable (amount)
+    CR Payment Method Account (amount)
+    """
+    method_code = PAYMENT_METHOD_ACCOUNT_MAP.get(payment.payment_method, "1000")
+    payment_account = _get_account_by_code(db, method_code)
+    accounts_payable = _get_account_by_code(db, "2000")
+
+    amount = Decimal(str(payment.amount))
+
+    lines = [
+        {"account_id": accounts_payable.id, "debit": amount, "credit": Decimal("0"), "description": "Accounts Payable"},
+        {"account_id": payment_account.id, "debit": Decimal("0"), "credit": amount, "description": f"Payment via {payment.payment_method}"},
+    ]
+
+    return _create_journal_entry(
+        db,
+        entry_date=payment.payment_date or date.today(),
+        description=f"Payment made to supplier",
+        reference_type="payment",
+        reference_id=payment.id,
+        lines=lines,
+    )
+
+
 def create_credit_note_journal_entry(db: Session, credit_note: models.Invoice) -> models.JournalEntry:
     """Create journal entry for a credit note (sales return).
     DR Sales Returns (base amount)
@@ -182,6 +237,14 @@ def create_credit_note_journal_entry(db: Session, credit_note: models.Invoice) -
         {"account_id": accounts_receivable.id, "debit": Decimal("0"), "credit": total, "description": "Accounts Receivable"},
     ]
 
+    # Reverse the cost of goods sold: returned stock goes back into inventory.
+    cogs = _compute_cogs(db, credit_note.items)
+    if cogs > 0:
+        cogs_account = _get_account_by_code(db, "5000")
+        inventory = _get_account_by_code(db, "1200")
+        lines.append({"account_id": inventory.id, "debit": cogs, "credit": Decimal("0"), "description": "Inventory"})
+        lines.append({"account_id": cogs_account.id, "debit": Decimal("0"), "credit": cogs, "description": "Cost of Goods Sold reversal"})
+
     return _create_journal_entry(
         db,
         entry_date=credit_note.invoice_date or date.today(),
@@ -192,31 +255,41 @@ def create_credit_note_journal_entry(db: Session, credit_note: models.Invoice) -
     )
 
 
-def create_purchase_journal_entry(db: Session, batches: list, supplier) -> models.JournalEntry:
-    """Create journal entry for a purchase.
-    DR Inventory (total purchase cost)
-    CR Accounts Payable (total purchase cost)
+def create_purchase_journal_entry(db: Session, bill: models.PurchaseBill) -> models.JournalEntry:
+    """Create journal entry for a purchase bill.
+    DR Inventory (goods value, ex-GST)
+    DR GST Input Tax (recoverable input GST)
+    CR Accounts Payable (bill total, incl. GST)
     """
     inventory = _get_account_by_code(db, "1200")
+    gst_input = _get_account_by_code(db, "2110")
     accounts_payable = _get_account_by_code(db, "2000")
 
-    total = Decimal("0")
-    for batch in batches:
-        total += Decimal(str(batch.purchase_price or 0)) * Decimal(str(batch.quantity or 0))
+    base_amount = Decimal("0")
+    gst_amount = Decimal("0")
+    for item in bill.items:
+        line_base = Decimal(str(item.purchase_price or 0)) * Decimal(str(item.quantity or 0))
+        line_tax = line_base * Decimal(str(item.tax_percent or 0)) / Decimal("100")
+        base_amount += line_base
+        gst_amount += line_tax
+
+    total = base_amount + gst_amount
 
     lines = [
-        {"account_id": inventory.id, "debit": total, "credit": Decimal("0"), "description": "Inventory"},
-        {"account_id": accounts_payable.id, "debit": Decimal("0"), "credit": total, "description": "Accounts Payable"},
+        {"account_id": inventory.id, "debit": base_amount, "credit": Decimal("0"), "description": "Inventory"},
     ]
+    if gst_amount > 0:
+        lines.append({"account_id": gst_input.id, "debit": gst_amount, "credit": Decimal("0"), "description": "GST Input Tax"})
+    lines.append({"account_id": accounts_payable.id, "debit": Decimal("0"), "credit": total, "description": "Accounts Payable"})
 
-    supplier_name = supplier.name if supplier else "Unknown"
+    supplier_name = bill.supplier.name if bill.supplier else "Unknown"
 
     return _create_journal_entry(
         db,
-        entry_date=date.today(),
-        description=f"Purchase from {supplier_name}",
+        entry_date=bill.bill_date or date.today(),
+        description=f"Purchase bill {bill.bill_number or ''} from {supplier_name}".strip(),
         reference_type="purchase",
-        reference_id=None,
+        reference_id=bill.id,
         lines=lines,
     )
 

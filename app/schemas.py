@@ -114,6 +114,50 @@ class Supplier(SupplierBase):
     class Config:
         from_attributes = True
 
+class PurchaseBillItemBase(BaseModel):
+    product_id: Optional[uuid.UUID] = None
+    batch_id: Optional[uuid.UUID] = None
+    quantity: Optional[int] = None
+    purchase_price: Optional[float] = None
+    tax_percent: Optional[float] = None
+    total_price: Optional[float] = None
+
+class PurchaseBillItemCreate(PurchaseBillItemBase):
+    pass
+
+class PurchaseBillItem(PurchaseBillItemBase):
+    id: uuid.UUID
+    purchase_bill_id: uuid.UUID
+
+    class Config:
+        from_attributes = True
+
+class PurchaseBillBase(BaseModel):
+    bill_number: Optional[str] = None
+    supplier_id: Optional[uuid.UUID] = None
+    bill_date: Optional[date] = None
+    due_date: Optional[date] = None
+    total_amount: Optional[float] = None
+    status: Optional[str] = 'active'
+    payment_status: Optional[str] = 'unpaid'
+    amount_paid: Optional[float] = 0
+    notes: Optional[str] = None
+
+class PurchaseBillCreate(PurchaseBillBase):
+    pass
+
+class PurchaseBillCreateWithItems(PurchaseBillBase):
+    items: List["PurchaseBillItemCreate"] = []
+
+class PurchaseBill(PurchaseBillBase):
+    id: uuid.UUID
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    items: List[PurchaseBillItem] = []
+
+    class Config:
+        from_attributes = True
+
 class ProductBatchBase(BaseModel):
     product_id: Optional[uuid.UUID] = None
     supplier_id: Optional[uuid.UUID] = None
@@ -231,7 +275,7 @@ class AccountBase(BaseModel):
     name: str
     account_type: str  # asset, liability, income, expense, equity
     parent_id: Optional[uuid.UUID] = None
-    is_system: Optional[bool] = True
+    is_system: Optional[bool] = False
     disabled: Optional[bool] = False
 
 class AccountCreate(AccountBase):
@@ -290,8 +334,11 @@ class JournalEntry(JournalEntryBase):
 
 
 class PaymentBase(BaseModel):
-    invoice_id: uuid.UUID
+    direction: Optional[str] = 'in'  # 'in' = customer receipt, 'out' = supplier payment
+    invoice_id: Optional[uuid.UUID] = None
     customer_id: Optional[uuid.UUID] = None
+    supplier_id: Optional[uuid.UUID] = None
+    purchase_bill_id: Optional[uuid.UUID] = None
     amount: float
     payment_method: str  # cash, upi, card, bank_transfer, cheque
     payment_date: date
@@ -299,7 +346,16 @@ class PaymentBase(BaseModel):
     notes: Optional[str] = None
 
 class PaymentCreate(PaymentBase):
-    pass
+    invoice_id: uuid.UUID  # customer receipts must reference an invoice
+
+class SupplierPaymentCreate(BaseModel):
+    purchase_bill_id: uuid.UUID
+    supplier_id: Optional[uuid.UUID] = None
+    amount: float
+    payment_method: str
+    payment_date: date
+    reference_number: Optional[str] = None
+    notes: Optional[str] = None
 
 class Payment(PaymentBase):
     id: uuid.UUID

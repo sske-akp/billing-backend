@@ -85,6 +85,41 @@ class Supplier(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+class PurchaseBill(Base):
+    __tablename__ = "purchase_bills"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    bill_number = Column(String, index=True)  # supplier's bill/invoice number
+    supplier_id = Column(UUID(as_uuid=True), ForeignKey("suppliers.id"))
+    bill_date = Column(Date)
+    due_date = Column(Date, nullable=True)
+    total_amount = Column(Numeric)
+    amount_paid = Column(Numeric, default=0)
+    payment_status = Column(String, default='unpaid')  # unpaid, partial, paid
+    status = Column(String, default='active')
+    notes = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    supplier = relationship("Supplier")
+    items = relationship("PurchaseBillItem", back_populates="purchase_bill", cascade="all, delete-orphan")
+
+class PurchaseBillItem(Base):
+    __tablename__ = "purchase_bill_items"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    purchase_bill_id = Column(UUID(as_uuid=True), ForeignKey("purchase_bills.id"), nullable=False)
+    product_id = Column(UUID(as_uuid=True), ForeignKey("products.id"))
+    batch_id = Column(UUID(as_uuid=True), ForeignKey("product_batches.id"), nullable=True)
+    quantity = Column(Integer)
+    purchase_price = Column(Numeric)  # per-unit cost, ex-GST
+    tax_percent = Column(Numeric)     # input GST rate
+    total_price = Column(Numeric)     # line total, incl. GST
+
+    purchase_bill = relationship("PurchaseBill", back_populates="items")
+    product = relationship("Product")
+    batch = relationship("ProductBatch")
+
 class ProductBatch(Base):
     __tablename__ = "product_batches"
 
@@ -178,7 +213,7 @@ class Account(Base):
     name = Column(String, nullable=False)
     account_type = Column(String, nullable=False)  # asset, liability, income, expense, equity
     parent_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=True)
-    is_system = Column(Boolean, default=True)
+    is_system = Column(Boolean, default=False)
     disabled = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -219,8 +254,11 @@ class Payment(Base):
     __tablename__ = "payments"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    invoice_id = Column(UUID(as_uuid=True), ForeignKey("invoices.id"), nullable=False)
+    direction = Column(String, default='in')  # 'in' = receipt from customer, 'out' = payment to supplier
+    invoice_id = Column(UUID(as_uuid=True), ForeignKey("invoices.id"), nullable=True)
     customer_id = Column(UUID(as_uuid=True), ForeignKey("customers.id"), nullable=True)
+    supplier_id = Column(UUID(as_uuid=True), ForeignKey("suppliers.id"), nullable=True)
+    purchase_bill_id = Column(UUID(as_uuid=True), ForeignKey("purchase_bills.id"), nullable=True)
     amount = Column(Numeric, nullable=False)
     payment_method = Column(String, nullable=False)  # cash, upi, card, bank_transfer, cheque
     payment_date = Column(Date, nullable=False)
@@ -231,4 +269,6 @@ class Payment(Base):
 
     invoice = relationship("Invoice", back_populates="payments")
     customer = relationship("Customer")
+    supplier = relationship("Supplier")
+    purchase_bill = relationship("PurchaseBill")
     journal_entry = relationship("JournalEntry")
