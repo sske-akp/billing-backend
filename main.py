@@ -18,6 +18,7 @@ from app.routers import (
     payments,
     accounting_reports,
     purchase_bills,
+    gst_returns,
 )
 from app.database import engine, Base, SessionLocal
 from app.db.migrations import run_migrations
@@ -82,6 +83,7 @@ app.include_router(journal_entries.router)
 app.include_router(payments.router)
 app.include_router(accounting_reports.router)
 app.include_router(purchase_bills.router)
+app.include_router(gst_returns.router)
 
 
 # This is important for Vercel

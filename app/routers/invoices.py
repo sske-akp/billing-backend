@@ -8,6 +8,17 @@ from datetime import date, datetime
 from .. import models, schemas
 from ..database import get_db
 from ..accounting import create_sale_journal_entry, create_credit_note_journal_entry, create_payment_journal_entry
+from ..gst import state_code_from_gstin, COMPANY_STATE_CODE
+
+
+def _resolve_place_of_supply(db, customer_id) -> str:
+    """Place of supply = customer's GST state, falling back to the seller's home state."""
+    if customer_id:
+        customer = db.query(models.Customer).filter(models.Customer.id == customer_id).first()
+        state = state_code_from_gstin(customer.gstin) if customer else None
+        if state:
+            return state
+    return COMPANY_STATE_CODE
 
 router = APIRouter(
     prefix="/invoices",
@@ -35,6 +46,9 @@ def create_invoice_with_items(payload: schemas.InvoiceCreateWithItems, db: Sessi
     # Create the invoice header
     invoice_data = payload.model_dump(exclude={"items"})
     db_invoice = models.Invoice(**invoice_data)
+    # Stamp place of supply (derive from customer GSTIN if not supplied)
+    if not db_invoice.place_of_supply:
+        db_invoice.place_of_supply = _resolve_place_of_supply(db, db_invoice.customer_id)
     db.add(db_invoice)
     db.flush()  # Get the invoice ID without committing
 
@@ -168,6 +182,8 @@ def create_credit_note(payload: schemas.CreditNoteCreate, db: Session = Depends(
         invoice_date=date.today(),
         invoice_type='credit_note',
         total_amount=-credit_total,
+        place_of_supply=original_invoice.place_of_supply
+        or _resolve_place_of_supply(db, original_invoice.customer_id),
         status='active',
         reference_invoice_id=payload.reference_invoice_id,
     )

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from . import models
+from .gst import COMPANY_STATE_CODE, state_code_from_gstin, is_intra_state, split_gst
 
 # Payment method to account code mapping
 PAYMENT_METHOD_ACCOUNT_MAP = {
@@ -108,6 +109,35 @@ def _compute_cogs(db: Session, items) -> Decimal:
     return cogs
 
 
+def _gst_split_lines(db: Session, gst_amount, party_state, *, output: bool, debit: bool) -> list[dict]:
+    """Build journal lines splitting a GST amount into CGST/SGST (intra-state)
+    or IGST (inter-state). ``output`` selects output (2101/2/3) vs input
+    (2111/2/3) accounts; ``debit`` controls which side the amount posts on."""
+    gst_amount = Decimal(str(gst_amount or 0))
+    if gst_amount <= 0:
+        return []
+    parts = split_gst(gst_amount, party_state)
+    codes = (
+        {"cgst": "2101", "sgst": "2102", "igst": "2103"}
+        if output
+        else {"cgst": "2111", "sgst": "2112", "igst": "2113"}
+    )
+    labels = {"cgst": "CGST", "sgst": "SGST", "igst": "IGST"}
+    kind = "Output" if output else "Input"
+    lines = []
+    for key in ("cgst", "sgst", "igst"):
+        amt = parts[key]
+        if amt and amt > 0:
+            acct = _get_account_by_code(db, codes[key])
+            lines.append({
+                "account_id": acct.id,
+                "debit": amt if debit else Decimal("0"),
+                "credit": Decimal("0") if debit else amt,
+                "description": f"{labels[key]} {kind} Tax",
+            })
+    return lines
+
+
 def create_sale_journal_entry(db: Session, invoice: models.Invoice) -> models.JournalEntry:
     """Create journal entry for a sale invoice.
     DR Accounts Receivable (total_amount)
@@ -118,7 +148,6 @@ def create_sale_journal_entry(db: Session, invoice: models.Invoice) -> models.Jo
     """
     accounts_receivable = _get_account_by_code(db, "1100")
     sales_revenue = _get_account_by_code(db, "4000")
-    gst_output = _get_account_by_code(db, "2100")
 
     total = Decimal(str(invoice.total_amount or 0))
     # Calculate base and GST from invoice items
@@ -136,8 +165,13 @@ def create_sale_journal_entry(db: Session, invoice: models.Invoice) -> models.Jo
     lines = [
         {"account_id": accounts_receivable.id, "debit": total, "credit": Decimal("0"), "description": "Accounts Receivable"},
         {"account_id": sales_revenue.id, "debit": Decimal("0"), "credit": base_amount, "description": "Sales Revenue"},
-        {"account_id": gst_output.id, "debit": Decimal("0"), "credit": gst_amount, "description": "GST Output Tax"},
     ]
+
+    # Split output GST into CGST/SGST (intra-state) or IGST (inter-state)
+    party_state = invoice.place_of_supply or state_code_from_gstin(
+        getattr(invoice.customer, "gstin", None)
+    )
+    lines += _gst_split_lines(db, gst_amount, party_state, output=True, debit=False)
 
     # Post cost of goods sold against inventory so gross profit and the
     # inventory asset are both correct.
@@ -217,7 +251,6 @@ def create_credit_note_journal_entry(db: Session, credit_note: models.Invoice) -
     CR Accounts Receivable (total amount)
     """
     sales_returns = _get_account_by_code(db, "4010")
-    gst_output = _get_account_by_code(db, "2100")
     accounts_receivable = _get_account_by_code(db, "1100")
 
     # Credit note total_amount is negative, so use abs
@@ -233,9 +266,13 @@ def create_credit_note_journal_entry(db: Session, credit_note: models.Invoice) -
 
     lines = [
         {"account_id": sales_returns.id, "debit": base_amount, "credit": Decimal("0"), "description": "Sales Returns"},
-        {"account_id": gst_output.id, "debit": gst_amount, "credit": Decimal("0"), "description": "GST Output Tax reversal"},
-        {"account_id": accounts_receivable.id, "debit": Decimal("0"), "credit": total, "description": "Accounts Receivable"},
     ]
+    # Reverse output GST (debit the same CGST/SGST or IGST output accounts)
+    party_state = credit_note.place_of_supply or state_code_from_gstin(
+        getattr(credit_note.customer, "gstin", None)
+    )
+    lines += _gst_split_lines(db, gst_amount, party_state, output=True, debit=True)
+    lines.append({"account_id": accounts_receivable.id, "debit": Decimal("0"), "credit": total, "description": "Accounts Receivable"})
 
     # Reverse the cost of goods sold: returned stock goes back into inventory.
     cogs = _compute_cogs(db, credit_note.items)
@@ -262,7 +299,6 @@ def create_purchase_journal_entry(db: Session, bill: models.PurchaseBill) -> mod
     CR Accounts Payable (bill total, incl. GST)
     """
     inventory = _get_account_by_code(db, "1200")
-    gst_input = _get_account_by_code(db, "2110")
     accounts_payable = _get_account_by_code(db, "2000")
 
     base_amount = Decimal("0")
@@ -278,8 +314,9 @@ def create_purchase_journal_entry(db: Session, bill: models.PurchaseBill) -> mod
     lines = [
         {"account_id": inventory.id, "debit": base_amount, "credit": Decimal("0"), "description": "Inventory"},
     ]
-    if gst_amount > 0:
-        lines.append({"account_id": gst_input.id, "debit": gst_amount, "credit": Decimal("0"), "description": "GST Input Tax"})
+    # Split input GST into CGST/SGST (intra-state) or IGST (inter-state)
+    supplier_state = state_code_from_gstin(getattr(bill.supplier, "gstin", None))
+    lines += _gst_split_lines(db, gst_amount, supplier_state, output=False, debit=True)
     lines.append({"account_id": accounts_payable.id, "debit": Decimal("0"), "credit": total, "description": "Accounts Payable"})
 
     supplier_name = bill.supplier.name if bill.supplier else "Unknown"
@@ -302,8 +339,14 @@ DEFAULT_ACCOUNTS = [
     {"code": "1100", "name": "Accounts Receivable", "account_type": "asset"},
     {"code": "1200", "name": "Inventory", "account_type": "asset"},
     {"code": "2000", "name": "Accounts Payable", "account_type": "liability"},
-    {"code": "2100", "name": "GST Output Tax", "account_type": "liability"},
-    {"code": "2110", "name": "GST Input Tax", "account_type": "liability"},
+    {"code": "2100", "name": "GST Output Tax", "account_type": "liability"},  # legacy (pre-split)
+    {"code": "2101", "name": "CGST Output Tax", "account_type": "liability"},
+    {"code": "2102", "name": "SGST Output Tax", "account_type": "liability"},
+    {"code": "2103", "name": "IGST Output Tax", "account_type": "liability"},
+    {"code": "2110", "name": "GST Input Tax", "account_type": "liability"},  # legacy (pre-split)
+    {"code": "2111", "name": "CGST Input Tax", "account_type": "asset"},
+    {"code": "2112", "name": "SGST Input Tax", "account_type": "asset"},
+    {"code": "2113", "name": "IGST Input Tax", "account_type": "asset"},
     {"code": "3000", "name": "Owner's Equity", "account_type": "equity"},
     {"code": "4000", "name": "Sales Revenue", "account_type": "income"},
     {"code": "4010", "name": "Sales Returns", "account_type": "income"},
@@ -313,19 +356,25 @@ DEFAULT_ACCOUNTS = [
 
 
 def seed_chart_of_accounts(db: Session) -> None:
-    """Seed the default chart of accounts if they don't exist yet."""
-    existing_count = db.query(models.Account).filter(models.Account.is_system == True).count()
-    if existing_count > 0:
-        return  # Already seeded
+    """Seed any missing default accounts. Idempotent per account code, so an
+    already-seeded database still picks up newly added accounts (e.g. the
+    CGST/SGST/IGST split accounts)."""
+    existing_codes = {
+        row[0] for row in db.query(models.Account.code).all()
+    }
 
+    added = False
     for acct in DEFAULT_ACCOUNTS:
-        db_account = models.Account(
+        if acct["code"] in existing_codes:
+            continue
+        db.add(models.Account(
             code=acct["code"],
             name=acct["name"],
             account_type=acct["account_type"],
             is_system=True,
             disabled=False,
-        )
-        db.add(db_account)
+        ))
+        added = True
 
-    db.commit()
+    if added:
+        db.commit()

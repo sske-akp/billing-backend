@@ -60,6 +60,7 @@ class Invoice(Base):
     invoice_date = Column(Date)
     invoice_type = Column(String)
     total_amount = Column(Numeric)
+    place_of_supply = Column(String, nullable=True)  # 2-digit GST state code
     status = Column(String, default='active')
     reference_invoice_id = Column(UUID(as_uuid=True), ForeignKey("invoices.id"), nullable=True)
     payment_status = Column(String, default='unpaid')

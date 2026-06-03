@@ -442,45 +442,34 @@ def get_gst_summary(
     date_to: date = Query(alias="to"),
     db: Session = Depends(get_db),
 ):
-    gst_output = db.query(models.Account).filter(models.Account.code == "2100").first()
-    gst_input = db.query(models.Account).filter(models.Account.code == "2110").first()
+    # Aggregate across legacy single-GST accounts and the CGST/SGST/IGST split
+    output_codes = ["2100", "2101", "2102", "2103"]
+    input_codes = ["2110", "2111", "2112", "2113"]
 
-    output_tax = Decimal("0")
-    input_tax = Decimal("0")
-
-    if gst_output:
-        result = (
-            db.query(
-                func.coalesce(func.sum(models.JournalLine.credit), 0).label("total_credit"),
-                func.coalesce(func.sum(models.JournalLine.debit), 0).label("total_debit"),
-            )
-            .join(models.JournalEntry, models.JournalLine.journal_entry_id == models.JournalEntry.id)
-            .filter(
-                models.JournalLine.account_id == gst_output.id,
-                models.JournalEntry.entry_date >= date_from,
-                models.JournalEntry.entry_date <= date_to,
-            )
-            .first()
-        )
-        if result:
-            output_tax = Decimal(str(result.total_credit)) - Decimal(str(result.total_debit))
-
-    if gst_input:
+    def _sum_for_codes(codes):
         result = (
             db.query(
                 func.coalesce(func.sum(models.JournalLine.debit), 0).label("total_debit"),
                 func.coalesce(func.sum(models.JournalLine.credit), 0).label("total_credit"),
             )
+            .join(models.Account, models.JournalLine.account_id == models.Account.id)
             .join(models.JournalEntry, models.JournalLine.journal_entry_id == models.JournalEntry.id)
             .filter(
-                models.JournalLine.account_id == gst_input.id,
+                models.Account.code.in_(codes),
                 models.JournalEntry.entry_date >= date_from,
                 models.JournalEntry.entry_date <= date_to,
             )
             .first()
         )
-        if result:
-            input_tax = Decimal(str(result.total_debit)) - Decimal(str(result.total_credit))
+        debit = Decimal(str(result.total_debit)) if result else Decimal("0")
+        credit = Decimal(str(result.total_credit)) if result else Decimal("0")
+        return debit, credit
+
+    out_debit, out_credit = _sum_for_codes(output_codes)
+    output_tax = out_credit - out_debit  # output tax is a credit balance
+
+    in_debit, in_credit = _sum_for_codes(input_codes)
+    input_tax = in_debit - in_credit  # input tax (ITC) is a debit balance
 
     net_payable = output_tax - input_tax
 

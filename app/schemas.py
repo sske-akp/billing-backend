@@ -66,6 +66,7 @@ class InvoiceBase(BaseModel):
     invoice_date: Optional[date] = None
     invoice_type: Optional[str] = None
     total_amount: Optional[float] = None
+    place_of_supply: Optional[str] = None
     status: Optional[str] = 'active'
     reference_invoice_id: Optional[uuid.UUID] = None
     payment_status: Optional[str] = 'unpaid'
