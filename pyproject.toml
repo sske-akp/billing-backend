@@ -5,11 +5,16 @@ requires-python = ">=3.10"
 dependencies = [
   "fastapi[standard]",
   "pydantic",
+  "pydantic[email]",
   "uvicorn",
   "sqlalchemy",
   "psycopg2-binary",
   "alembic",
   "python-dotenv",
+  "requests>=2.34.2",
+  "bcrypt",
+  "PyJWT",
+  "python-multipart",
 ]
 
 [project.scripts]

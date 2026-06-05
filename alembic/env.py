@@ -4,11 +4,28 @@ from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 
 from alembic import context
+# Importing from app.database loads the .env and applies the same DATABASE_URL
+# normalization (postgres:// -> postgresql://) the app uses, so Alembic and the
+# app always connect identically.
+from app.database import DATABASE_URL
 from app.models import Base
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
+
+# Drive the DB connection from DATABASE_URL so switching databases is just a
+# matter of changing the env var — no edits to alembic.ini. This overrides any
+# sqlalchemy.url in the ini; if DATABASE_URL is unset we fall back to the ini
+# value, and error clearly if neither is present.
+if DATABASE_URL:
+    # Escape % so ConfigParser interpolation doesn't choke on URL-encoded passwords.
+    config.set_main_option("sqlalchemy.url", DATABASE_URL.replace("%", "%%"))
+elif not config.get_main_option("sqlalchemy.url"):
+    raise RuntimeError(
+        "DATABASE_URL is not set and alembic.ini has no sqlalchemy.url. "
+        "Set DATABASE_URL (e.g. in billing-backend/.env) before running alembic."
+    )
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

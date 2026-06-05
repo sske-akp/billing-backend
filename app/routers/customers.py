@@ -4,6 +4,7 @@ from typing import List
 
 from .. import models, schemas
 from ..database import get_db
+from ..audit import log_audit
 
 router = APIRouter(
     prefix="/customers",
@@ -14,6 +15,15 @@ router = APIRouter(
 def create_customer(customer: schemas.CustomerCreate, db: Session = Depends(get_db)):
     db_customer = models.Customer(**customer.model_dump())
     db.add(db_customer)
+    db.flush()
+    # Example audit-trail call site (lands in the active company schema).
+    log_audit(
+        db,
+        action="create",
+        entity="customers",
+        entity_id=db_customer.id,
+        after=customer.model_dump(),
+    )
     db.commit()
     db.refresh(db_customer)
     return db_customer
@@ -49,6 +59,13 @@ def delete_customer(customer_id: str, db: Session = Depends(get_db)):
     if db_customer is None:
         raise HTTPException(status_code=404, detail="Customer not found")
 
+    log_audit(
+        db,
+        action="delete",
+        entity="customers",
+        entity_id=customer_id,
+        before={"id": str(db_customer.id), "name": db_customer.name},
+    )
     db.delete(db_customer)
     db.commit()
     return {"detail": "Customer deleted successfully"}

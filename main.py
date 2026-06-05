@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers import (
@@ -19,8 +19,19 @@ from app.routers import (
     accounting_reports,
     purchase_bills,
     gst_returns,
+    auth as auth_router,
 )
-from app.database import engine, Base, SessionLocal
+from app.database import (
+    engine,
+    Base,
+    SessionLocal,
+    set_active_company_schema,
+    reset_active_company_schema,
+    DEFAULT_COMPANY_SCHEMA,
+)
+from app import control_models
+from app.auth import decode_access_token
+from app import audit  # noqa: F401  registers AuditLog on the business Base
 from app.db.migrations import run_migrations
 from app.accounting import seed_chart_of_accounts
 
@@ -29,22 +40,80 @@ from app.accounting import seed_chart_of_accounts
 
 app = FastAPI()
 
-# Set up CORS middleware
+# Set up CORS middleware. Tightened from "*" to explicit dev origins so the
+# Next.js frontend (port 3000) works while we stop reflecting arbitrary
+# origins. Add production origins here before deploying.
 origins = [
-    "http://localhost",
-    "http://localhost:8000",
-    "http://127.0.0.1",
-    "http://127.0.0.1:8000",
-    # Add other origins as needed for your frontend application
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
 ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for development
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def company_context_middleware(request: Request, call_next):
+    """Resolve the active company for the request and apply it to the DB
+    session context.
+
+    - Reads ``Authorization: Bearer <jwt>``; if present and valid, identifies
+      the user. Invalid/missing auth is NOT rejected here (routers enforce
+      auth via dependencies) so existing unauthenticated endpoints keep
+      working during the transition.
+    - Reads ``X-Company-Id``; if provided AND the authenticated user has
+      access (or is a superuser), the active company schema is set for the
+      duration of the request. Otherwise it falls back to the legacy
+      DEFAULT_COMPANY_SCHEMA ("sskedata").
+    """
+    schema_name = DEFAULT_COMPANY_SCHEMA
+    company_id = request.headers.get("X-Company-Id")
+    auth_header = request.headers.get("Authorization", "")
+
+    user = None
+    if auth_header.lower().startswith("bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
+        try:
+            payload = decode_access_token(token)
+            user_id = payload.get("sub")
+        except Exception:
+            user_id = None
+        if user_id:
+            db = SessionLocal()
+            try:
+                db.connection(execution_options={"schema_translate_map": {}})
+                user = (
+                    db.query(control_models.User)
+                    .filter(control_models.User.id == user_id)
+                    .first()
+                )
+                if company_id and user is not None:
+                    company = (
+                        db.query(control_models.Company)
+                        .filter(control_models.Company.id == company_id)
+                        .first()
+                    )
+                    if company is not None and company.is_active:
+                        has_access = user.is_superuser or any(
+                            str(a.company_id) == str(company.id)
+                            for a in user.accesses
+                        )
+                        if has_access:
+                            schema_name = company.schema_name
+            finally:
+                db.close()
+
+    token_ctx = set_active_company_schema(schema_name)
+    try:
+        response = await call_next(request)
+    finally:
+        reset_active_company_schema(token_ctx)
+    return response
 
 
 @app.get("/")
@@ -67,6 +136,7 @@ def startup():
         db.close()
 
 
+app.include_router(auth_router.router)
 app.include_router(customers.router)
 app.include_router(product_categories.router)
 app.include_router(products.router)
