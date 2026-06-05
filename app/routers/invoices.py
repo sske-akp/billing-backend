@@ -54,6 +54,8 @@ def create_invoice_with_items(payload: schemas.InvoiceCreateWithItems, db: Sessi
         db_item = models.InvoiceItem(**item_dict)
         db.add(db_item)
 
+    db.flush()  # Flush items so invoice.items is populated before journal entry
+
     # Create sale journal entry
     try:
         create_sale_journal_entry(db, db_invoice)
@@ -187,6 +189,8 @@ def create_credit_note(payload: schemas.CreditNoteCreate, db: Session = Depends(
             ).first()
             if db_batch and db_batch.remaining_qty is not None:
                 db_batch.remaining_qty += item_data["quantity"]
+
+    db.flush()  # Flush items so db_credit_note.items is populated before journal entry
 
     # Create credit note journal entry
     try:
