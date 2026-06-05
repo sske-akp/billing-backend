@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+import os
 
 from app.routers import (
     customers,
@@ -48,9 +49,13 @@ origins = [
     "http://127.0.0.1:3000",
 ]
 
+_allow_origin_regex = os.getenv(
+    "FASTAPI_ALLOW_ORIGIN_REGEX", r"^https?://.*\.vercel\.app$"
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
+    allow_origin_regex=_allow_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -100,8 +105,7 @@ async def company_context_middleware(request: Request, call_next):
                     )
                     if company is not None and company.is_active:
                         has_access = user.is_superuser or any(
-                            str(a.company_id) == str(company.id)
-                            for a in user.accesses
+                            str(a.company_id) == str(company.id) for a in user.accesses
                         )
                         if has_access:
                             schema_name = company.schema_name
