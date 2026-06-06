@@ -9,6 +9,7 @@ from .. import models, schemas
 from ..database import get_db
 from ..accounting import create_sale_journal_entry, create_credit_note_journal_entry, create_payment_journal_entry
 from ..gst import state_code_from_gstin, COMPANY_STATE_CODE
+from ..pricing import resolve_price
 
 
 def _resolve_place_of_supply(db, customer_id) -> str:
@@ -52,10 +53,31 @@ def create_invoice_with_items(payload: schemas.InvoiceCreateWithItems, db: Sessi
     db.add(db_invoice)
     db.flush()  # Get the invoice ID without committing
 
+    # Resolve the customer's price level once for the whole invoice
+    customer_price_level = None
+    if db_invoice.customer_id:
+        db_customer = db.query(models.Customer).filter(
+            models.Customer.id == db_invoice.customer_id
+        ).first()
+        if db_customer and db_customer.price_level_id:
+            customer_price_level = db.query(models.PriceLevel).filter(
+                models.PriceLevel.id == db_customer.price_level_id
+            ).first()
+
     # Create each item and decrement batch stock
     for item_data in payload.items:
         item_dict = item_data.model_dump()
         item_dict["invoice_id"] = db_invoice.id
+
+        # Auto-resolve selling_price if not explicitly provided
+        if not item_dict.get("selling_price") and item_dict.get("product_id"):
+            db_product = db.query(models.Product).filter(
+                models.Product.id == item_dict["product_id"]
+            ).first()
+            if db_product:
+                resolved = resolve_price(db, db_product, customer_price_level)
+                if resolved is not None:
+                    item_dict["selling_price"] = float(resolved)
 
         # Decrement batch remaining_qty if batch_id and quantity provided
         if item_dict.get("batch_id") and item_dict.get("quantity"):

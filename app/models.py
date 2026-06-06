@@ -1,9 +1,19 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Numeric, ForeignKey, Date
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Numeric, ForeignKey, Date, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from .database import Base
 import uuid
 from datetime import datetime
+
+class PriceLevel(Base):
+    __tablename__ = "price_levels"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    name = Column(String, nullable=False)  # "Retail", "Dealer", "Wholesale", "Electrician"
+    sort_order = Column(Integer, default=0)
+    extra_discount_percent = Column(Numeric, default=0)  # additional % off base price for this tier
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 
 class Customer(Base):
     __tablename__ = "customers"
@@ -15,8 +25,15 @@ class Customer(Base):
     phone_number = Column(String)
     email = Column(String)
     notes = Column(String, nullable=True)
+    price_level_id = Column(UUID(as_uuid=True), ForeignKey("price_levels.id"), nullable=True)
+    state_code = Column(String(2), nullable=True)  # 2-char GST state code
+    credit_limit = Column(Numeric, nullable=True)
+    payment_terms_days = Column(Integer, nullable=True)  # 0=COD, 30=Net30
+    disabled = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    price_level = relationship("PriceLevel")
 
 class Discount(Base):
     __tablename__ = "discounts"
@@ -157,6 +174,7 @@ class ProductCategory(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String)
     disabled = Column(Boolean, default=False)
+    discount_percent = Column(Numeric, nullable=True)  # default discount off MRP for all products in category
 
     products = relationship("Product")
     discounts = relationship("Discount")
@@ -174,11 +192,27 @@ class Product(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     disabled = Column(Boolean, default=False)
     gst_rate = Column(Numeric, default=18)
+    mrp = Column(Numeric, nullable=True)  # MRP anchor for price resolution
+    discount_percent = Column(Numeric, nullable=True)  # product-level discount override
 
     brand = relationship("ProductBrand")
     category = relationship("ProductCategory")
     batches = relationship("ProductBatch")
     invoice_items = relationship("InvoiceItem")
+
+
+class ProductPriceOverride(Base):
+    __tablename__ = "product_price_overrides"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    product_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=False)
+    price_level_id = Column(UUID(as_uuid=True), ForeignKey("price_levels.id"), nullable=False)
+    price = Column(Numeric, nullable=False)  # explicit net price, bypasses formula
+
+    __table_args__ = (UniqueConstraint("product_id", "price_level_id"),)
+
+    product = relationship("Product")
+    price_level = relationship("PriceLevel")
 
 # Note: The 'stock' and 'stock_summary' tables seem to have integer primary keys
 # and might not fit the UUID pattern used in other tables.

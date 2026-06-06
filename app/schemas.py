@@ -1,7 +1,45 @@
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime, date
+from decimal import Decimal
 import uuid
+
+# --- Price Level Schemas ---
+
+class PriceLevelBase(BaseModel):
+    name: str
+    sort_order: Optional[int] = 0
+    extra_discount_percent: Optional[Decimal] = Decimal(0)
+
+class PriceLevelCreate(PriceLevelBase):
+    pass
+
+class PriceLevel(PriceLevelBase):
+    id: uuid.UUID
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+# --- Product Price Override Schemas ---
+
+class ProductPriceOverrideBase(BaseModel):
+    product_id: uuid.UUID
+    price_level_id: uuid.UUID
+    price: Decimal
+
+class ProductPriceOverrideCreate(ProductPriceOverrideBase):
+    pass
+
+class ProductPriceOverride(ProductPriceOverrideBase):
+    id: uuid.UUID
+
+    class Config:
+        from_attributes = True
+
+
+# --- Customer Schemas ---
 
 class CustomerBase(BaseModel):
     name: Optional[str] = None
@@ -10,6 +48,11 @@ class CustomerBase(BaseModel):
     phone_number: Optional[str] = None
     email: Optional[str] = None
     notes: Optional[str] = None
+    price_level_id: Optional[uuid.UUID] = None
+    state_code: Optional[str] = None
+    credit_limit: Optional[Decimal] = None
+    payment_terms_days: Optional[int] = None
+    disabled: Optional[bool] = False
 
 class CustomerCreate(CustomerBase):
     pass
@@ -18,6 +61,7 @@ class Customer(CustomerBase):
     id: uuid.UUID
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    price_level: Optional[PriceLevel] = None
 
     class Config:
         from_attributes = True
@@ -199,6 +243,7 @@ class ProductBrand(ProductBrandBase):
 class ProductCategoryBase(BaseModel):
     name: Optional[str] = None
     disabled: Optional[bool] = False
+    discount_percent: Optional[Decimal] = None
 
 class ProductCategoryCreate(ProductCategoryBase):
     pass
@@ -217,6 +262,8 @@ class ProductBase(BaseModel):
     category_id: Optional[uuid.UUID] = None
     disabled: Optional[bool] = False
     gst_rate: Optional[float] = 18
+    mrp: Optional[Decimal] = None
+    discount_percent: Optional[Decimal] = None
 
 class ProductCreate(ProductBase):
     pass

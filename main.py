@@ -21,6 +21,9 @@ from app.routers import (
     purchase_bills,
     gst_returns,
     auth as auth_router,
+    price_levels,
+    product_price_overrides,
+    products_csv,
 )
 from app.database import (
     engine,
@@ -143,6 +146,7 @@ def startup():
 app.include_router(auth_router.router)
 app.include_router(customers.router)
 app.include_router(product_categories.router)
+app.include_router(products_csv.router)  # must be before products.router (static paths win over /{id})
 app.include_router(products.router)
 app.include_router(invoice_items.router)
 app.include_router(invoices.router)
@@ -158,6 +162,8 @@ app.include_router(payments.router)
 app.include_router(accounting_reports.router)
 app.include_router(purchase_bills.router)
 app.include_router(gst_returns.router)
+app.include_router(price_levels.router)
+app.include_router(product_price_overrides.router)
 
 
 # This is important for Vercel
