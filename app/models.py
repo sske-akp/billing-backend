@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Numeric, ForeignKey, Date
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Numeric, ForeignKey, Date, JSON
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from .database import Base
@@ -273,3 +273,20 @@ class Payment(Base):
     supplier = relationship("Supplier")
     purchase_bill = relationship("PurchaseBill")
     journal_entry = relationship("JournalEntry")
+
+
+class Motor(Base):
+    """Single-table motor inventory tracking.
+
+    Stores motors categorized by HP, model, and serial numbers.
+    Single brand business: only HP, model, and serials are tracked.
+    """
+    __tablename__ = "motors"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    hp = Column(String, nullable=False, index=True)
+    model = Column(String, nullable=True)
+    serials = Column(JSON, default=list, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+

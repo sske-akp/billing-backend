@@ -21,6 +21,7 @@ from app.routers import (
     purchase_bills,
     gst_returns,
     auth as auth_router,
+    motors,
 )
 from app.database import (
     engine,
@@ -158,6 +159,7 @@ app.include_router(payments.router)
 app.include_router(accounting_reports.router)
 app.include_router(purchase_bills.router)
 app.include_router(gst_returns.router)
+app.include_router(motors.router)
 
 
 # This is important for Vercel

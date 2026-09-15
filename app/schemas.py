@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import datetime, date
 import uuid
@@ -365,3 +365,36 @@ class Payment(PaymentBase):
 
     class Config:
         from_attributes = True
+
+
+# --- Motor Inventory & Serial Tracking (Single Table) -----------------------
+class MotorBase(BaseModel):
+    hp: str
+    model: Optional[str] = None
+    serials: List[str] = Field(default_factory=list)
+
+class MotorCreate(MotorBase):
+    pass
+
+class MotorUpdate(BaseModel):
+    hp: Optional[str] = None
+    model: Optional[str] = None
+    serials: Optional[List[str]] = None
+
+class MotorSerialAdd(BaseModel):
+    serial: str
+
+class MotorSerialsAddBatch(BaseModel):
+    serials: List[str]
+
+class MotorHpRename(BaseModel):
+    new_hp: str
+
+class MotorResponse(MotorBase):
+    id: uuid.UUID
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
