@@ -61,6 +61,7 @@ def create_motor(payload: schemas.MotorCreate, db: Session = Depends(get_db)):
         hp=payload.hp.strip(),
         model=payload.model.strip() if payload.model else None,
         serials=serials,
+        is_dual_set=payload.is_dual_set,
     )
     db.add(db_motor)
     db.commit()
@@ -93,6 +94,8 @@ def update_motor(
                 cleaned.append(clean)
         motor.serials = cleaned
         flag_modified(motor, "serials")
+    if payload.is_dual_set is not None:
+        motor.is_dual_set = payload.is_dual_set
 
     db.commit()
     db.refresh(motor)

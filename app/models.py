@@ -4,6 +4,7 @@ from sqlalchemy.orm import relationship
 from .database import Base
 import uuid
 from datetime import datetime
+import sqlalchemy as sa
 
 class Customer(Base):
     __tablename__ = "customers"
@@ -278,8 +279,8 @@ class Payment(Base):
 class Motor(Base):
     """Single-table motor inventory tracking.
 
-    Stores motors categorized by HP, model, and serial numbers.
-    Single brand business: only HP, model, and serials are tracked.
+    Stores motors categorized by HP, model, serial numbers, and unit tracking type.
+    Single brand business: only HP, model, serials, and is_dual_set are tracked.
     """
     __tablename__ = "motors"
 
@@ -287,6 +288,6 @@ class Motor(Base):
     hp = Column(String, nullable=False, index=True)
     model = Column(String, nullable=True)
     serials = Column(JSON, default=list, nullable=False)
+    is_dual_set = Column(Boolean, default=True, nullable=False, server_default=sa.text("true"))
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-

@@ -372,6 +372,7 @@ class MotorBase(BaseModel):
     hp: str
     model: Optional[str] = None
     serials: List[str] = Field(default_factory=list)
+    is_dual_set: bool = True
 
 class MotorCreate(MotorBase):
     pass
@@ -380,6 +381,7 @@ class MotorUpdate(BaseModel):
     hp: Optional[str] = None
     model: Optional[str] = None
     serials: Optional[List[str]] = None
+    is_dual_set: Optional[bool] = None
 
 class MotorSerialAdd(BaseModel):
     serial: str
